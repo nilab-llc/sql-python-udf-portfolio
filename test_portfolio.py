@@ -8,6 +8,30 @@ from portfolio import ROOT, generate, normalize_device, run
 
 
 class PortfolioTests(unittest.TestCase):
+    def test_numeric_identifiers_preserved_and_invalid_cast_rolls_back(self):
+        import duckdb
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            tables = {
+                'customers.csv': [['customer_id', 'plan'], ['001', 'basic']],
+                'plan_history.csv': [['history_id', 'customer_id', 'plan', 'valid_from', 'valid_to'], [1, '001', 'basic', '2026-01-01', None]],
+                'usage_events.csv': [['source_row', 'event_id', 'customer_id', 'occurred_at', 'received_at', 'megabytes', 'device_code'], [1, '0001', '001', '2026-10-01', '2026-10-02', 10, 'device:A001']],
+            }
+            for name, rows in tables.items():
+                with (folder / name).open('w', newline='', encoding='utf-8') as file:
+                    csv.writer(file).writerows(rows)
+            db = folder / 'test.duckdb'
+            self.assertEqual(run(db, folder)[0], [(datetime.date(2026, 10, 1), '001', 'basic', 1, 10, 0)])
+            with duckdb.connect(str(db)) as connection:
+                self.assertEqual(connection.execute('SELECT event_id FROM classified').fetchone()[0], '0001')
+            tables['usage_events.csv'][1][5] = 'not-a-number'
+            with (folder / 'usage_events.csv').open('w', newline='', encoding='utf-8') as file:
+                csv.writer(file).writerows(tables['usage_events.csv'])
+            with self.assertRaises(duckdb.ConversionException):
+                run(db, folder)
+            with duckdb.connect(str(db)) as connection:
+                self.assertEqual(connection.execute('SELECT total_mb FROM daily_usage').fetchone()[0], 10)
+
     def test_temporal_join_boundaries_gaps_overlaps(self):
         generate()
         with tempfile.TemporaryDirectory() as temp:
@@ -94,7 +118,8 @@ class PortfolioTests(unittest.TestCase):
     def test_udf_contract(self):
         cases = [('device:a001', 'A001'), ('{"device_id":"a002"}', 'A002'),
                  (None, None), ('{"device_id":12}', None), ('{broken', None),
-                 ('invalid', None), ('device:A001junk', None)]
+                 ('invalid', None), ('device:A001junk', None),
+                 ('device:A１２３', None), ('{"device_id":"A１２３"}', None)]
         for value, expected in cases:
             with self.subTest(value=value):
                 self.assertEqual(normalize_device(value), expected)

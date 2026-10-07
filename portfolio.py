@@ -21,12 +21,12 @@ def normalize_device(value):
             payload = json.loads(value)
             code = payload.get('device_id') if isinstance(payload, dict) else None
         else:
-            match = re.fullmatch(r'device:\s*([A-Za-z]\d{3})', value.strip())
+            match = re.fullmatch(r'device:\s*([A-Za-z][0-9]{3})', value.strip())
             code = match.group(1) if match else None
         if not isinstance(code, str):
             return None
         code = code.strip().upper()
-        return code if re.fullmatch(r'[A-Z]\d{3}', code) else None
+        return code if re.fullmatch(r'[A-Z][0-9]{3}', code) else None
     except (ValueError, TypeError):
         return None
 
@@ -76,7 +76,8 @@ def run(database, data_dir=None):
         connection.execute('CREATE OR REPLACE TABLE usage_events (source_row INTEGER PRIMARY KEY, event_id VARCHAR, customer_id VARCHAR, occurred_at TIMESTAMP, received_at TIMESTAMP, megabytes BIGINT, device_code VARCHAR)')
         connection.execute('CREATE OR REPLACE TABLE plan_history (history_id INTEGER PRIMARY KEY, customer_id VARCHAR NOT NULL, plan VARCHAR NOT NULL, valid_from TIMESTAMP NOT NULL, valid_to TIMESTAMP, CHECK(valid_to IS NULL OR valid_to > valid_from))')
         for table in ('customers', 'plan_history', 'usage_events'):
-            connection.execute(f"INSERT INTO {table} SELECT * FROM read_csv(?, header=true)", [str(data_dir / f'{table}.csv')])
+            # Preserve leading zeros in identifiers; typed target columns handle casts.
+            connection.execute(f"INSERT INTO {table} SELECT * FROM read_csv(?, header=true, all_varchar=true)", [str(data_dir / f'{table}.csv')])
         connection.execute((ROOT / 'sql' / 'pipeline.sql').read_text(encoding='utf-8'))
         result = connection.execute('SELECT * FROM daily_usage ORDER BY usage_date, customer_id, plan').fetchall()
         counts = {table: connection.execute(f'SELECT count(*) FROM {table}').fetchone()[0]
