@@ -1,0 +1,3 @@
+usage_date,customer_id,plan,event_count,total_mb,daytime_mb
+2026-10-01,C001,basic,8,90,90
+2026-10-01,C002,premium,8,80,80
