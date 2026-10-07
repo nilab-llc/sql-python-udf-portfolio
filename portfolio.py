@@ -50,6 +50,10 @@ def generate():
     ]
     for filename, headers, rows in [
         ('customers.csv', ['customer_id', 'plan'], customers),
+        ('plan_history.csv', ['history_id', 'customer_id', 'plan', 'valid_from', 'valid_to'],
+         [(1, 'C001', 'basic', '2026-01-01', '2026-10-01 12:00:00'),
+          (2, 'C001', 'premium', '2026-10-01 12:00:00', None),
+          (3, 'C002', 'premium', '2026-01-01', None)]),
         ('usage_events.csv', ['source_row', 'event_id', 'customer_id', 'occurred_at', 'received_at', 'megabytes', 'device_code'], events),
         ('expected_daily_usage.csv', ['usage_date', 'customer_id', 'plan', 'event_count', 'total_mb', 'daytime_mb'],
          [('2026-10-01', 'C001', 'basic', 8, 90, 90), ('2026-10-01', 'C002', 'premium', 8, 80, 80)]),
@@ -69,8 +73,9 @@ def run(database, data_dir=None):
         connection.create_function('normalize_device', normalize_device, ['VARCHAR'],
                                    'VARCHAR', null_handling='special')
         connection.execute('CREATE OR REPLACE TABLE customers (customer_id VARCHAR PRIMARY KEY, plan VARCHAR NOT NULL)')
-        connection.execute('CREATE OR REPLACE TABLE usage_events (source_row INTEGER, event_id VARCHAR, customer_id VARCHAR, occurred_at TIMESTAMP, received_at TIMESTAMP, megabytes BIGINT, device_code VARCHAR)')
-        for table in ('customers', 'usage_events'):
+        connection.execute('CREATE OR REPLACE TABLE usage_events (source_row INTEGER PRIMARY KEY, event_id VARCHAR, customer_id VARCHAR, occurred_at TIMESTAMP, received_at TIMESTAMP, megabytes BIGINT, device_code VARCHAR)')
+        connection.execute('CREATE OR REPLACE TABLE plan_history (history_id INTEGER PRIMARY KEY, customer_id VARCHAR NOT NULL, plan VARCHAR NOT NULL, valid_from TIMESTAMP NOT NULL, valid_to TIMESTAMP, CHECK(valid_to IS NULL OR valid_to > valid_from))')
+        for table in ('customers', 'plan_history', 'usage_events'):
             connection.execute(f"INSERT INTO {table} SELECT * FROM read_csv(?, header=true)", [str(data_dir / f'{table}.csv')])
         connection.execute((ROOT / 'sql' / 'pipeline.sql').read_text(encoding='utf-8'))
         result = connection.execute('SELECT * FROM daily_usage ORDER BY usage_date, customer_id, plan').fetchall()

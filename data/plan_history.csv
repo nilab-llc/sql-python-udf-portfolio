@@ -1,0 +1,4 @@
+history_id,customer_id,plan,valid_from,valid_to
+1,C001,basic,2026-01-01,2026-10-01 12:00:00
+2,C001,premium,2026-10-01 12:00:00,
+3,C002,premium,2026-01-01,

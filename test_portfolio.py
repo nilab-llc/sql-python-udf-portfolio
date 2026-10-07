@@ -8,11 +8,53 @@ from portfolio import ROOT, generate, normalize_device, run
 
 
 class PortfolioTests(unittest.TestCase):
+    def test_temporal_join_boundaries_gaps_overlaps(self):
+        generate()
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            shutil.copy(ROOT / 'data' / 'customers.csv', folder)
+            with (folder / 'plan_history.csv').open('w', newline='', encoding='utf-8') as file:
+                csv.writer(file).writerows([
+                    ['history_id', 'customer_id', 'plan', 'valid_from', 'valid_to'],
+                    [1, 'C001', 'basic', '2026-10-01 00:00:00', '2026-10-01 12:00:00'],
+                    [2, 'C001', 'premium', '2026-10-01 12:00:00', None],
+                    [3, 'C002', 'premium', '2026-10-01', None],
+                    [4, 'C002', 'premium', '2026-10-01 12:00:00', None],
+                ])
+            with (folder / 'usage_events.csv').open('w', newline='', encoding='utf-8') as file:
+                writer = csv.writer(file)
+                writer.writerow(['source_row', 'event_id', 'customer_id', 'occurred_at', 'received_at', 'megabytes', 'device_code'])
+                for index, customer, timestamp in [
+                    (1, 'C001', '2026-09-30 23:59:59'),
+                    (2, 'C001', '2026-10-01 00:00:00'),
+                    (3, 'C001', '2026-10-01 11:59:59'),
+                    (4, 'C001', '2026-10-01 12:00:00'),
+                    (5, 'C001', '2026-10-02 12:00:00'),
+                    (6, 'C002', '2026-10-01 12:00:00'),
+                ]:
+                    writer.writerow([index, str(index), customer, timestamp, '2026-10-03', 10, 'device:A001'])
+            db = folder / 'test.duckdb'
+            result, counts = run(db, folder)
+            self.assertEqual(result, [
+                (datetime.date(2026, 10, 1), 'C001', 'basic', 2, 20, 10),
+                (datetime.date(2026, 10, 1), 'C001', 'premium', 1, 10, 10),
+                (datetime.date(2026, 10, 2), 'C001', 'premium', 1, 10, 10),
+            ])
+            self.assertEqual(counts['classified'], counts['deduplicated'])
+            self.assertEqual(counts['rejected_events'], 2)
+            import duckdb
+            with duckdb.connect(str(db)) as connection:
+                self.assertEqual(connection.execute('SELECT event_id, rejection_reason, plan_match_count FROM rejected_events ORDER BY event_id').fetchall(),
+                                 [('1', 'no_matching_plan', 0), ('6', 'ambiguous_plan', 2)])
+            self.assertEqual(run(db, folder), (result, counts))
+
     def test_boundaries_rejections_and_tie_break(self):
         generate()
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
             shutil.copy(ROOT / 'data' / 'customers.csv', folder)
+            with (folder / 'plan_history.csv').open('w', newline='', encoding='utf-8') as file:
+                csv.writer(file).writerows([['history_id','customer_id','plan','valid_from','valid_to'], [1,'C001','basic','2026-01-01',None]])
             rows = [
                 (1, 'A', 'C001', '2026-10-01 08:59:59', '2026-10-02', 1, 'device:A001'),
                 (2, 'B', 'C001', '2026-10-01 09:00:00', '2026-10-02', 2, 'device:A001'),
