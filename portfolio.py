@@ -60,20 +60,23 @@ def generate():
             writer.writerows(rows)
 
 
-def run(database):
+def run(database, data_dir=None):
     import duckdb
+    data_dir = Path(data_dir) if data_dir is not None else ROOT / "data"
     connection = duckdb.connect(str(database))
     try:
+        connection.execute('BEGIN TRANSACTION')
         connection.create_function('normalize_device', normalize_device, ['VARCHAR'],
                                    'VARCHAR', null_handling='special')
         connection.execute('CREATE OR REPLACE TABLE customers (customer_id VARCHAR PRIMARY KEY, plan VARCHAR NOT NULL)')
         connection.execute('CREATE OR REPLACE TABLE usage_events (source_row INTEGER, event_id VARCHAR, customer_id VARCHAR, occurred_at TIMESTAMP, received_at TIMESTAMP, megabytes BIGINT, device_code VARCHAR)')
         for table in ('customers', 'usage_events'):
-            connection.execute(f"INSERT INTO {table} SELECT * FROM read_csv(?, header=true)", [str(ROOT / 'data' / f'{table}.csv')])
+            connection.execute(f"INSERT INTO {table} SELECT * FROM read_csv(?, header=true)", [str(data_dir / f'{table}.csv')])
         connection.execute((ROOT / 'sql' / 'pipeline.sql').read_text(encoding='utf-8'))
-        result = connection.execute('SELECT * FROM daily_usage ORDER BY customer_id').fetchall()
+        result = connection.execute('SELECT * FROM daily_usage ORDER BY usage_date, customer_id, plan').fetchall()
         counts = {table: connection.execute(f'SELECT count(*) FROM {table}').fetchone()[0]
                   for table in ('usage_events', 'deduplicated', 'classified', 'rejected_events')}
+        connection.execute('COMMIT')
     finally:
         connection.close()
     return result, counts

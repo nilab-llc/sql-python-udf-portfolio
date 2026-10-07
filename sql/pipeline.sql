@@ -1,7 +1,7 @@
 CREATE OR REPLACE TABLE deduplicated AS
 SELECT * EXCLUDE (rn) FROM (
     SELECT *, row_number() OVER (
-        PARTITION BY event_id ORDER BY received_at DESC, source_row DESC
+        PARTITION BY event_id, CASE WHEN event_id IS NULL OR trim(event_id) = '' THEN source_row END ORDER BY received_at DESC, source_row DESC
     ) AS rn FROM usage_events
 ) WHERE rn = 1;
 
@@ -9,6 +9,8 @@ CREATE OR REPLACE TABLE classified AS
 SELECT e.*, c.plan,
        normalize_device(e.device_code) AS normalized_device,
        CASE
+         WHEN e.event_id IS NULL OR trim(e.event_id) = '' THEN 'missing_event_id'
+         WHEN e.occurred_at IS NULL OR e.received_at IS NULL THEN 'missing_timestamp'
          WHEN c.customer_id IS NULL THEN 'unknown_customer'
          WHEN e.megabytes IS NULL THEN 'missing_volume'
          WHEN e.megabytes < 0 THEN 'negative_volume'
